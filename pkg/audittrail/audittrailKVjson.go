@@ -196,9 +196,14 @@ func (imo *ImmudbObjects) RestoreHistory(primaryKeyValue string) ([]ObjectHistor
 			}
 		}
 
+		txId, err := strconv.ParseUint(string(e.Value), 10, 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		objects = append(objects, ObjectHistory{
 			Object:   jObject,
-			TxID:     e.Tx,
+			TxID:     txId,
 			Revision: e.Revision,
 		})
 	}
