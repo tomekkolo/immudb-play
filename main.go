@@ -15,5 +15,7 @@ func main() {
 	}
 	//audittrail.AuditTrailSQL(queryOnly)
 	//audittrail.AuditTrailKV(queryOnly)
-	audittrail.AuditTrailKVGjson(queryOnly)
+	//audittrail.AuditTrailKVGjson(queryOnly)
+	//audittrail.PopulatePSQL()
+	audittrail.PGAuditTrail(queryOnly)
 }

@@ -1,11 +1,15 @@
 package audittrail
 
 import (
+	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,39 +90,50 @@ func (imo *ImmudbObjects) StoreBytes(objectBytes []byte) (uint64, error) {
 // for now just based on SK
 func (imo *ImmudbObjects) Restore(key, condition string) ([]string, error) {
 	log.Printf("Restore: %s\n", fmt.Sprintf("%s.%s.{%s", imo.collection, key, condition))
-	entries, err := imo.client.Scan(context.TODO(), &schema.ScanRequest{
-		Prefix: []byte(fmt.Sprintf("%s.%s.{%s", imo.collection, key, condition)),
-		Limit:  200,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("could not scan for objects, %w", err)
-	}
-
+	seekKey := []byte("")
 	var objects []string
-	for _, e := range entries.Entries {
-		// retrieve an object
-		objectEntries, err := imo.client.Scan(context.Background(), &schema.ScanRequest{
-			Prefix: []byte(fmt.Sprintf("%s.{%s}", imo.collection, string(e.Value))),
+	for {
+		entries, err := imo.client.Scan(context.TODO(), &schema.ScanRequest{
+			Prefix:  []byte(fmt.Sprintf("%s.%s.{%s", imo.collection, key, condition)),
+			SeekKey: seekKey,
+			Limit:   999,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("could not scan for object, %w", err)
+			return nil, fmt.Errorf("could not scan for objects, %w", err)
 		}
 
-		jObject := ""
-		for _, oe := range objectEntries.Entries {
-			jObject, err = sjson.Set(jObject, strings.TrimPrefix(string(oe.Key), fmt.Sprintf("%s.{%s}.", imo.collection, string(e.Value))), string(oe.Value))
+		if len(entries.Entries) == 0 {
+			break
+		}
+
+		for _, e := range entries.Entries {
+			// retrieve an object
+			objectEntries, err := imo.client.Scan(context.Background(), &schema.ScanRequest{
+				Prefix: []byte(fmt.Sprintf("%s.{%s}", imo.collection, string(e.Value))),
+			})
 			if err != nil {
-				return nil, fmt.Errorf("could not restore object: %w", err)
+				return nil, fmt.Errorf("could not scan for object, %w", err)
 			}
+
+			jObject := ""
+			for _, oe := range objectEntries.Entries {
+				jObject, err = sjson.Set(jObject, strings.TrimPrefix(string(oe.Key), fmt.Sprintf("%s.{%s}.", imo.collection, string(e.Value))), string(oe.Value))
+				if err != nil {
+					return nil, fmt.Errorf("could not restore object: %w", err)
+				}
+			}
+
+			// Maybe setting secondary index for fast retrieval of an object would speed up gets ?
+
+			// var object map[string]interface{}
+			// err = json.Unmarshal([]byte(jObject), &object)
+			// if err != nil {
+			// 	return nil, fmt.Errorf("could not unmarshal to an object: %w", err)
+			// }
+
+			seekKey = e.Key
+			objects = append(objects, jObject)
 		}
-
-		// var object map[string]interface{}
-		// err = json.Unmarshal([]byte(jObject), &object)
-		// if err != nil {
-		// 	return nil, fmt.Errorf("could not unmarshal to an object: %w", err)
-		// }
-
-		objects = append(objects, jObject)
 	}
 
 	return objects, nil
@@ -141,33 +156,35 @@ func AuditTrailKVGjson(queryOnly bool) {
 		indexedKeys: []string{"id", "user", "action"},
 	}
 
-	start := time.Now()
-	// create entries
-	for i := 0; i < 1; i++ {
-		log.Printf("generating audit trail %d\n", i)
-		aes := generateAuditTrail()
-		// no kv transactions
-		for _, ae := range aes {
-			txID, err := immuObjects.Store(ae)
-			if err != nil {
-				log.Fatal(err)
+	if !queryOnly {
+		start := time.Now()
+		// create entries
+		for i := 0; i < 1000; i++ {
+			log.Printf("generating audit trail %d\n", i)
+			aes := generateAuditTrail()
+			// no kv transactions
+			for _, ae := range aes {
+				txID, err := immuObjects.Store(ae)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				log.Printf("Object set %d\n", txID)
 			}
 
-			log.Printf("Object set %d\n", txID)
+			fmt.Printf("Create audit trail %d\n", i)
 		}
 
-		fmt.Printf("Create audit trail %d\n", i)
+		end := time.Now()
+		log.Printf("Creating table took: %s\n", end.Sub(start).String())
 	}
 
-	end := time.Now()
-	log.Printf("Creating table took: %s\n", end.Sub(start).String())
-
-	objects, err := immuObjects.Restore("id", "")
+	objects, err := immuObjects.Restore("user", "user10")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("OBJECTS: %+v", objects)
+	log.Printf("OBJECTS: %+v, COUNT: %d\n", objects, len(objects))
 	// for _, object := range objects {
 	// 	var ae auditEntry
 	// 	// this will not work as we do not keep types
@@ -178,4 +195,107 @@ func AuditTrailKVGjson(queryOnly bool) {
 
 	// 	log.Printf("Audit entry restored: %+v\n", ae)
 	// }
+}
+
+type PGAudit struct {
+	Timestamp      time.Time `json:"timestamp"`
+	AuditType      string    `json:"audit_type"`
+	StatementID    int       `json:"statement_id"`
+	SubstatementID int       `json:"substatement_id,omitempty"`
+	Class          string    `json:"class,omitempty"`
+	Command        string    `json:"command,omitempty"`
+	ObjectType     string    `json:"object_type,omitempty"`
+	ObjectName     string    `json:"object_name,omitempty"`
+	Statement      string    `json:"statement,omitempty"`
+	Parameter      string    `json:"parameter,omitempty"`
+}
+
+func PGAuditTrail(queryOnly bool) {
+	log.Printf("Starting KV PGAudit trail")
+	opts := immudb.DefaultOptions().WithAddress("localhost").WithPort(3322)
+
+	client := immudb.NewClient().WithOptions(opts)
+	err := client.OpenSession(context.TODO(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer client.CloseSession(context.TODO())
+	immuObjects := ImmudbObjects{
+		client:      client,
+		collection:  "pgaudit",
+		indexedKeys: []string{"statement_id", "timestamp", "audit_type", "class", "command"},
+	}
+
+	pgAuditFile, err := os.Open("test/pgaudit.log")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	pgAuditScanner := bufio.NewScanner(pgAuditFile)
+	pgAuditScanner.Split(bufio.ScanLines)
+
+	for pgAuditScanner.Scan() {
+		line := pgAuditScanner.Text()
+		splitLine := strings.Split(line, " [294] LOG:  AUDIT: ")
+		if len(splitLine) != 2 {
+			log.Println("could not split audit log")
+			continue
+		}
+		//log.Printf("SPlit line: %+v\n", splitLine)
+		ts, err := time.Parse("2006-02-01 15:04:05.000 GMT", splitLine[0])
+		if err != nil {
+			log.Printf("could not parse timestamp: %v\n", err)
+			continue
+		}
+
+		auditCSV := csv.NewReader(strings.NewReader(splitLine[1]))
+		auditCSVRecords, err := auditCSV.Read()
+		if err != nil {
+			log.Printf("could not parse csv line: %v", err)
+			continue
+		}
+
+		if len(auditCSVRecords) < 9 {
+			log.Printf("invalid audit length: %d\n", len(auditCSVRecords))
+			continue
+		}
+
+		pga := PGAudit{
+			Timestamp:  ts,
+			AuditType:  auditCSVRecords[0],
+			Class:      auditCSVRecords[3],
+			Command:    auditCSVRecords[4],
+			ObjectType: auditCSVRecords[5],
+			ObjectName: auditCSVRecords[6],
+			Statement:  auditCSVRecords[7],
+			Parameter:  auditCSVRecords[8],
+		}
+
+		pga.StatementID, err = strconv.Atoi(auditCSVRecords[1])
+		if err != nil {
+			log.Printf("could not parse statementID, %v\n", err)
+			continue
+		}
+
+		pga.SubstatementID, err = strconv.Atoi(auditCSVRecords[2])
+		if err != nil {
+			log.Printf("could not parse substatementID, %v\n", err)
+			continue
+		}
+
+		txID, err := immuObjects.Store(pga)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Printf("stored object with txID %d: %+v\n", txID, pga)
+	}
+
+	objects, err := immuObjects.Restore("statement_id", "92")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("OBJECTS: %+v, COUNT: %d\n", objects, len(objects))
 }
