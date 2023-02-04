@@ -82,6 +82,31 @@ func (imo *ImmudbObjects) StoreBytes(objectBytes []byte) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("could not store object: %w", err)
 	}
+
+	// Create set at transaction for later retrieval of versioned object
+	for i, or := range immudbObjectRequest.KVs {
+		if i < len(imo.indexedKeys) {
+			continue
+		}
+		_, err := imo.client.ZAddAt(context.TODO(),
+			[]byte(fmt.Sprintf("%s.%s.{%s}.%d", imo.collection, imo.indexedKeys[0], gjPK.String(), txh.Id)),
+			0,
+			or.Key,
+			txh.Id,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// create index for set versions
+	_, err = imo.client.Set(context.TODO(),
+		[]byte(fmt.Sprintf("%s.versions.%s.{%s}", imo.collection, imo.indexedKeys[0], gjPK.String())), []byte(fmt.Sprintf("%d", txh.Id)))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	log.Printf("Object set %v\n", txh)
 
 	return txh.Id, nil
@@ -134,6 +159,48 @@ func (imo *ImmudbObjects) Restore(key, condition string) ([]string, error) {
 			seekKey = e.Key
 			objects = append(objects, jObject)
 		}
+	}
+
+	return objects, nil
+}
+
+type ObjectHistory struct {
+	Object   string
+	TxID     uint64
+	Revision uint64
+}
+
+func (imo *ImmudbObjects) RestoreHistory(primaryKeyValue string) ([]ObjectHistory, error) {
+	entries, err := imo.client.History(context.TODO(), &schema.HistoryRequest{
+		Key: []byte(fmt.Sprintf("%s.versions.%s.{%s}", imo.collection, imo.indexedKeys[0], primaryKeyValue)),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	objects := []ObjectHistory{}
+	for _, e := range entries.Entries {
+		log.Printf("HISTORY: Key: %s, Value: %s\n", string(e.Key), string(e.Value))
+		ze, err := imo.client.ZScan(context.Background(), &schema.ZScanRequest{
+			Set: []byte(fmt.Sprintf("%s.%s.{%s}.%s", imo.collection, imo.indexedKeys[0], primaryKeyValue, string(e.Value))),
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		jObject := ""
+		for _, ze := range ze.Entries {
+			jObject, err = sjson.Set(jObject, strings.TrimPrefix(string(ze.Entry.Key), fmt.Sprintf("%s.{%s}.", imo.collection, primaryKeyValue)), string(ze.Entry.Value))
+			if err != nil {
+				return nil, fmt.Errorf("could not restore object: %w", err)
+			}
+		}
+
+		objects = append(objects, ObjectHistory{
+			Object:   jObject,
+			TxID:     e.Tx,
+			Revision: e.Revision,
+		})
 	}
 
 	return objects, nil
@@ -298,4 +365,11 @@ func PGAuditTrail(queryOnly bool) {
 	}
 
 	log.Printf("OBJECTS: %+v, COUNT: %d\n", objects, len(objects))
+
+	objectsHistory, err := immuObjects.RestoreHistory("921")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("History OBJECTS: %+v, COUNT: %d\n", objectsHistory, len(objectsHistory))
 }
