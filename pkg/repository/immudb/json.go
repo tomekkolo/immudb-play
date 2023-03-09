@@ -1,4 +1,4 @@
-package immuobject
+package immudb
 
 import (
 	"context"
@@ -15,25 +15,25 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-type ImmudbObject struct {
+type JsonRepository struct {
 	client      immudb.ImmuClient
 	collection  string
-	indexedKeys []string
+	indexedKeys []string // first key is considered primary key
 }
 
-func New(client immudb.ImmuClient, collection string, indexedKeys []string) *ImmudbObject {
+func NewJsonRepository(client immudb.ImmuClient, collection string, indexedKeys []string) *JsonRepository {
 	if len(indexedKeys) == 0 {
-		log.Fatal("ImmudbObjects requires at least primary key")
+		log.Fatal("JsonRepository requires at least primary key")
 	}
 
-	return &ImmudbObject{
+	return &JsonRepository{
 		client:      client,
 		collection:  collection,
 		indexedKeys: indexedKeys,
 	}
 }
 
-func (imo *ImmudbObject) Store(object interface{}) (uint64, error) {
+func (imo *JsonRepository) Store(object interface{}) (uint64, error) {
 	objectBytes, err := json.Marshal(object)
 	if err != nil {
 		return 0, fmt.Errorf("could not marshal object: %w", err)
@@ -42,7 +42,7 @@ func (imo *ImmudbObject) Store(object interface{}) (uint64, error) {
 	return imo.StoreBytes(objectBytes)
 }
 
-func (imo *ImmudbObject) StoreBytes(objectBytes []byte) (uint64, error) {
+func (imo *JsonRepository) StoreBytes(objectBytes []byte) (uint64, error) {
 	if len(imo.indexedKeys) == 0 {
 		return 0, errors.New("primary key is mandataory")
 	}
@@ -121,7 +121,7 @@ func (imo *ImmudbObject) StoreBytes(objectBytes []byte) (uint64, error) {
 }
 
 // for now just based on SK
-func (imo *ImmudbObject) Restore(key, condition string) ([]string, error) {
+func (imo *JsonRepository) Restore(key, condition string) ([]string, error) {
 	log.Printf("Restore: %s\n", fmt.Sprintf("%s.%s.{%s", imo.collection, key, condition))
 	seekKey := []byte("")
 	var objects []string
@@ -150,20 +150,11 @@ func (imo *ImmudbObject) Restore(key, condition string) ([]string, error) {
 
 			jObject := ""
 			for _, oe := range objectEntries.Entries {
-				//jObject, err = sjson.Set(jObject, strings.TrimPrefix(string(oe.Key), fmt.Sprintf("%s.{%s}.", imo.collection, string(e.Value))), string(oe.Value))
 				jObject, err = sjson.SetRaw(jObject, strings.TrimPrefix(string(oe.Key), fmt.Sprintf("%s.{%s}.", imo.collection, string(e.Value))), string(oe.Value))
 				if err != nil {
 					return nil, fmt.Errorf("could not restore object: %w", err)
 				}
 			}
-
-			// Maybe setting secondary index for fast retrieval of an object would speed up gets ?
-
-			// var object map[string]interface{}
-			// err = json.Unmarshal([]byte(jObject), &object)
-			// if err != nil {
-			// 	return nil, fmt.Errorf("could not unmarshal to an object: %w", err)
-			// }
 
 			seekKey = e.Key
 			objects = append(objects, jObject)
@@ -173,13 +164,13 @@ func (imo *ImmudbObject) Restore(key, condition string) ([]string, error) {
 	return objects, nil
 }
 
-type ObjectHistory struct {
+type History struct {
 	Object   string
 	TxID     uint64
 	Revision uint64
 }
 
-func (imo *ImmudbObject) RestoreHistory(primaryKeyValue string) ([]ObjectHistory, error) {
+func (imo *JsonRepository) History(primaryKeyValue string) ([]History, error) {
 	entries, err := imo.client.History(context.TODO(), &schema.HistoryRequest{
 		Key: []byte(fmt.Sprintf("%s.versions.%s.{%s}", imo.collection, imo.indexedKeys[0], primaryKeyValue)),
 	})
@@ -187,7 +178,7 @@ func (imo *ImmudbObject) RestoreHistory(primaryKeyValue string) ([]ObjectHistory
 		log.Fatal(err)
 	}
 
-	objects := []ObjectHistory{}
+	objects := []History{}
 	for _, e := range entries.Entries {
 		log.Printf("HISTORY: Key: %s, Value: %s\n", string(e.Key), string(e.Value))
 		ze, err := imo.client.ZScan(context.Background(), &schema.ZScanRequest{
@@ -199,7 +190,7 @@ func (imo *ImmudbObject) RestoreHistory(primaryKeyValue string) ([]ObjectHistory
 
 		jObject := ""
 		for _, ze := range ze.Entries {
-			jObject, err = sjson.Set(jObject, strings.TrimPrefix(string(ze.Entry.Key), fmt.Sprintf("%s.{%s}.", imo.collection, primaryKeyValue)), string(ze.Entry.Value))
+			jObject, err = sjson.SetRaw(jObject, strings.TrimPrefix(string(ze.Entry.Key), fmt.Sprintf("%s.{%s}.", imo.collection, primaryKeyValue)), string(ze.Entry.Value))
 			if err != nil {
 				return nil, fmt.Errorf("could not restore object: %w", err)
 			}
@@ -210,7 +201,7 @@ func (imo *ImmudbObject) RestoreHistory(primaryKeyValue string) ([]ObjectHistory
 			log.Fatal(err)
 		}
 
-		objects = append(objects, ObjectHistory{
+		objects = append(objects, History{
 			Object:   jObject,
 			TxID:     txId,
 			Revision: e.Revision,
