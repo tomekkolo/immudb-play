@@ -11,7 +11,7 @@ type lineProvider interface {
 	ReadLine() (string, error)
 }
 
-type lineParser interface {
+type LineParser interface {
 	Parse(line string) ([]byte, error)
 }
 
@@ -30,10 +30,10 @@ type AuditHistoryEntry struct {
 type AuditService struct {
 	lineProvider   lineProvider
 	jsonRepository jsonRepository
-	lineParser     lineParser
+	lineParser     LineParser
 }
 
-func NewAuditService(lineProvider lineProvider, lineParser lineParser, jsonRepository jsonRepository) *AuditService {
+func NewAuditService(lineProvider lineProvider, lineParser LineParser, jsonRepository jsonRepository) *AuditService {
 	return &AuditService{
 		lineProvider:   lineProvider,
 		lineParser:     lineParser,
@@ -61,32 +61,4 @@ func (as *AuditService) Run() error {
 
 		log.Printf("Stored pg entry with id %d", id)
 	}
-}
-
-func (pga *AuditService) Read(key string, condition string) ([][]byte, error) {
-	jsons, err := pga.jsonRepository.Read(key, condition)
-	if err != nil {
-		return nil, fmt.Errorf("could not read pg audit, %w", err)
-	}
-
-	return jsons, nil
-}
-
-func (pga *AuditService) History(primaryKey string) ([]AuditHistoryEntry, error) {
-	historyEntries, err := pga.jsonRepository.History(primaryKey)
-	if err != nil {
-		return nil, fmt.Errorf("could not read history of %s, %w", primaryKey, err)
-	}
-
-	var auditHistoryEntries []AuditHistoryEntry
-	for _, he := range historyEntries {
-		var auditHistoryEntry AuditHistoryEntry
-		auditHistoryEntry.Entry = he.Entry
-		auditHistoryEntry.Revision = he.Revision
-		auditHistoryEntry.TXID = he.TxID
-
-		auditHistoryEntries = append(auditHistoryEntries, auditHistoryEntry)
-	}
-
-	return auditHistoryEntries, nil
 }

@@ -1,4 +1,4 @@
-package pgaudit
+package lineparser
 
 import (
 	"encoding/csv"

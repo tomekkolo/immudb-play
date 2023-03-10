@@ -6,13 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strconv"
-	"strings"
 
 	"github.com/codenotary/immudb/pkg/api/schema"
 	immudb "github.com/codenotary/immudb/pkg/client"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 type JsonKVRepository struct {
@@ -54,11 +51,16 @@ func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 		return 0, errors.New("missing primary key in object")
 	}
 
+	log.Printf("PAYLOAD: %s", fmt.Sprintf("%s.payload.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String()))
 	immudbObjectRequest := &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{ // crete primary key index
 				Key:   []byte(fmt.Sprintf("%s.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String())),
-				Value: []byte(gjPK.String()),
+				Value: []byte(fmt.Sprintf("%s.payload.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String())), //value is link to payload
+			},
+			{ // create payload entry
+				Key:   []byte(fmt.Sprintf("%s.payload.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String())),
+				Value: jBytes,
 			},
 		},
 	}
@@ -72,19 +74,19 @@ func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 		immudbObjectRequest.KVs = append(immudbObjectRequest.KVs,
 			&schema.KeyValue{ // crete secondary key index <collection>.<SKName>.<SKVALUE>.<PKVALUE>
 				Key:   []byte(fmt.Sprintf("%s.%s.{%s}.{%s}", jr.collection, jr.indexedKeys[i], gjSK.String(), gjPK.String())),
-				Value: []byte(gjPK.String()),
+				Value: []byte([]byte(fmt.Sprintf("%s.payload.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String()))), //value is link to payload
 			},
 		)
 	}
 
 	// iterate over all object fields
-	gjsonObject.ForEach(func(key, value gjson.Result) bool {
-		immudbObjectRequest.KVs = append(immudbObjectRequest.KVs, &schema.KeyValue{
-			Key:   []byte(fmt.Sprintf("%s.{%s}.%s", jr.collection, gjPK.String(), key.Str)),
-			Value: []byte(value.Raw),
-		})
-		return true
-	})
+	// gjsonObject.ForEach(func(key, value gjson.Result) bool {
+	// 	immudbObjectRequest.KVs = append(immudbObjectRequest.KVs, &schema.KeyValue{
+	// 		Key:   []byte(fmt.Sprintf("%s.{%s}.%s", jr.collection, gjPK.String(), key.Str)),
+	// 		Value: []byte(value.Raw),
+	// 	})
+	// 	return true
+	// })
 
 	txh, err := jr.client.SetAll(context.TODO(), immudbObjectRequest)
 	if err != nil {
@@ -92,28 +94,28 @@ func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 	}
 
 	// Create set at transaction for later retrieval of versioned object
-	for i, or := range immudbObjectRequest.KVs {
-		if i < len(jr.indexedKeys) {
-			continue
-		}
-		_, err := jr.client.ZAddAt(context.TODO(),
-			[]byte(fmt.Sprintf("%s.%s.{%s}.%d", jr.collection, jr.indexedKeys[0], gjPK.String(), txh.Id)),
-			0,
-			or.Key,
-			txh.Id,
-		)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
+	// for i, or := range immudbObjectRequest.KVs {
+	// 	if i < len(jr.indexedKeys) {
+	// 		continue
+	// 	}
+	// 	_, err := jr.client.ZAddAt(context.TODO(),
+	// 		[]byte(fmt.Sprintf("%s.%s.{%s}.%d", jr.collection, jr.indexedKeys[0], gjPK.String(), txh.Id)),
+	// 		0,
+	// 		or.Key,
+	// 		txh.Id,
+	// 	)
+	// 	if err != nil {
+	// 		log.Fatal(err)
+	// 	}
+	// }
 
 	// create index for set versions
-	_, err = jr.client.Set(context.TODO(),
-		[]byte(fmt.Sprintf("%s.versions.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String())), []byte(fmt.Sprintf("%d", txh.Id)))
+	// _, err = jr.client.Set(context.TODO(),
+	// 	[]byte(fmt.Sprintf("%s.versions.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String())), []byte(fmt.Sprintf("%d", txh.Id)))
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
 	log.Printf("Object set %v\n", txh)
 
@@ -141,23 +143,13 @@ func (jr *JsonKVRepository) Read(key, condition string) ([][]byte, error) {
 
 		for _, e := range entries.Entries {
 			// retrieve an object
-			objectEntries, err := jr.client.Scan(context.Background(), &schema.ScanRequest{
-				Prefix: []byte(fmt.Sprintf("%s.{%s}", jr.collection, string(e.Value))),
-			})
+			objectEntry, err := jr.client.Get(context.Background(), e.Value)
 			if err != nil {
 				return nil, fmt.Errorf("could not scan for object, %w", err)
 			}
 
-			jObject := ""
-			for _, oe := range objectEntries.Entries {
-				jObject, err = sjson.SetRaw(jObject, strings.TrimPrefix(string(oe.Key), fmt.Sprintf("%s.{%s}.", jr.collection, string(e.Value))), string(oe.Value))
-				if err != nil {
-					return nil, fmt.Errorf("could not restore object: %w", err)
-				}
-			}
-
 			seekKey = e.Key
-			objects = append(objects, []byte(jObject))
+			objects = append(objects, objectEntry.Value)
 		}
 	}
 
@@ -171,8 +163,9 @@ type History struct {
 }
 
 func (imo *JsonKVRepository) History(primaryKeyValue string) ([]History, error) {
+	log.Printf("HISTORY REQ: %s", fmt.Sprintf("%s.payload.%s.{%s}", imo.collection, imo.indexedKeys[0], primaryKeyValue))
 	entries, err := imo.client.History(context.TODO(), &schema.HistoryRequest{
-		Key: []byte(fmt.Sprintf("%s.versions.%s.{%s}", imo.collection, imo.indexedKeys[0], primaryKeyValue)),
+		Key: []byte(fmt.Sprintf("%s.payload.%s.{%s}", imo.collection, imo.indexedKeys[0], primaryKeyValue)),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -181,31 +174,36 @@ func (imo *JsonKVRepository) History(primaryKeyValue string) ([]History, error) 
 	objects := []History{}
 	for _, e := range entries.Entries {
 		log.Printf("HISTORY: Key: %s, Value: %s\n", string(e.Key), string(e.Value))
-		ze, err := imo.client.ZScan(context.Background(), &schema.ZScanRequest{
-			Set: []byte(fmt.Sprintf("%s.%s.{%s}.%s", imo.collection, imo.indexedKeys[0], primaryKeyValue, string(e.Value))),
-		})
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		jObject := ""
-		for _, ze := range ze.Entries {
-			jObject, err = sjson.SetRaw(jObject, strings.TrimPrefix(string(ze.Entry.Key), fmt.Sprintf("%s.{%s}.", imo.collection, primaryKeyValue)), string(ze.Entry.Value))
-			if err != nil {
-				return nil, fmt.Errorf("could not restore object: %w", err)
-			}
-		}
-
-		txId, err := strconv.ParseUint(string(e.Value), 10, 64)
-		if err != nil {
-			log.Fatal(err)
-		}
-
 		objects = append(objects, History{
-			Entry:    []byte(jObject),
-			TxID:     txId,
+			Entry:    e.Value,
 			Revision: e.Revision,
+			TxID:     e.Tx,
 		})
+		// ze, err := imo.client.ZScan(context.Background(), &schema.ZScanRequest{
+		// 	Set: []byte(fmt.Sprintf("%s.%s.{%s}.%s", imo.collection, imo.indexedKeys[0], primaryKeyValue, string(e.Value))),
+		// })
+		// if err != nil {
+		// 	log.Fatal(err)
+		// }
+
+		// jObject := ""
+		// for _, ze := range ze.Entries {
+		// 	jObject, err = sjson.SetRaw(jObject, strings.TrimPrefix(string(ze.Entry.Key), fmt.Sprintf("%s.{%s}.", imo.collection, primaryKeyValue)), string(ze.Entry.Value))
+		// 	if err != nil {
+		// 		return nil, fmt.Errorf("could not restore object: %w", err)
+		// 	}
+		// }
+
+		// txId, err := strconv.ParseUint(string(e.Value), 10, 64)
+		// if err != nil {
+		// 	log.Fatal(err)
+		// }
+
+		// objects = append(objects, History{
+		// 	Entry:    []byte(jObject),
+		// 	TxID:     txId,
+		// 	Revision: e.Revision,
+		// })
 	}
 
 	return objects, nil
