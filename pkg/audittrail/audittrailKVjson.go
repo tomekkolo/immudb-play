@@ -7,8 +7,8 @@ import (
 )
 
 type jsonRepository interface {
-	Store(object interface{}) (uint64, error)
-	Restore(key string, condition string) ([]string, error)
+	Write(object interface{}) (uint64, error)
+	Read(key string, condition string) ([]string, error)
 }
 
 type AuditTrailJson struct {
@@ -37,7 +37,7 @@ func (atj *AuditTrailJson) Run() {
 		for i := 0; i < atj.numOfTrails; i++ {
 			aes := generateAuditTrail()
 			for j, ae := range aes {
-				txID, err := atj.jsonRepository.Store(ae)
+				txID, err := atj.jsonRepository.Write(ae)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -51,7 +51,7 @@ func (atj *AuditTrailJson) Run() {
 	}
 
 	log.Printf("Restoring audit trail with index: %s and condition: %s\n", atj.restoreKey, atj.restorePrefix)
-	objects, err := atj.jsonRepository.Restore(atj.restoreKey, atj.restorePrefix)
+	objects, err := atj.jsonRepository.Read(atj.restoreKey, atj.restorePrefix)
 	if err != nil {
 		log.Fatal(err)
 	}
