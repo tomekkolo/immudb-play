@@ -1,16 +1,31 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+)
+
+var flagFollow bool
 
 var tailCmd = &cobra.Command{
 	Use:   "tail",
 	Short: "Tail your source and store audit data in immudb",
+	RunE:  tail,
 }
 
 func init() {
 	rootCmd.AddCommand(tailCmd)
-	tailCmd.PersistentFlags().Bool("follow", false, "if True, follow data stream")
-	rootCmd.PersistentFlags().StringSlice("indexes", nil, "list of fields to create indexes. First entry is primary key")
-	rootCmd.PersistentFlags().String("parser", "", "line parser to be used. When not specified, lines will be considered as jsons. Also available 'pgaudit'")
-	//rootCmd.MarkFlagRequired("indexes")
+	tailCmd.PersistentFlags().BoolVar(&flagFollow, "follow", false, "If True, follow data stream")
+}
+
+func tail(cmd *cobra.Command, args []string) error {
+	if cmd.CalledAs() == "tail" {
+		return cmd.Help()
+	}
+
+	err := runParentCmdE(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

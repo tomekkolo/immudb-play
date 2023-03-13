@@ -1,4 +1,4 @@
-package audittrail
+package main
 
 import (
 	"database/sql"
@@ -27,4 +27,8 @@ func PopulatePSQL() {
 		}
 	}
 
+}
+
+func main() {
+	PopulatePSQL()
 }

@@ -2,8 +2,9 @@ package service
 
 import (
 	"fmt"
-	"log"
+	"io"
 
+	log "github.com/sirupsen/logrus"
 	immudbrepository "github.com/tomekkolo/immudb-play/pkg/repository/immudb"
 )
 
@@ -15,7 +16,7 @@ type LineParser interface {
 	Parse(line string) ([]byte, error)
 }
 
-type jsonRepository interface {
+type JsonRepository interface {
 	WriteBytes(b []byte) (uint64, error)
 	Read(key string, condition string) ([][]byte, error)
 	History(primaryKeyValue string) ([]immudbrepository.History, error)
@@ -29,11 +30,11 @@ type AuditHistoryEntry struct {
 
 type AuditService struct {
 	lineProvider   lineProvider
-	jsonRepository jsonRepository
+	jsonRepository JsonRepository
 	lineParser     LineParser
 }
 
-func NewAuditService(lineProvider lineProvider, lineParser LineParser, jsonRepository jsonRepository) *AuditService {
+func NewAuditService(lineProvider lineProvider, lineParser LineParser, jsonRepository JsonRepository) *AuditService {
 	return &AuditService{
 		lineProvider:   lineProvider,
 		lineParser:     lineParser,
@@ -45,20 +46,24 @@ func (as *AuditService) Run() error {
 	for {
 		l, err := as.lineProvider.ReadLine()
 		if err != nil {
+			if err == io.EOF {
+				log.Printf("Reached EOF")
+				return nil
+			}
 			return err
 		}
 
 		b, err := as.lineParser.Parse(l)
 		if err != nil {
-			log.Printf("Invalid line format, skipping, %v", err)
+			log.WithError(err).WithField("line", l).Debug("Invalid line format, skipping")
 			continue
 		}
 
 		id, err := as.jsonRepository.WriteBytes(b)
 		if err != nil {
-			return fmt.Errorf("could not store pg audit entry, %w", err)
+			return fmt.Errorf("could not store audit entry, %w", err)
 		}
 
-		log.Printf("Stored pg entry with id %d", id)
+		log.WithField("_id", id).WithField("line", l).Trace("Stored line")
 	}
 }

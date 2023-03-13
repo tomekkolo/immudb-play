@@ -35,24 +35,25 @@ func (p *PGAuditLineParser) Parse(line string) ([]byte, error) {
 	if len(line) < 26 { // min length of timestamp with timezone
 		return nil, fmt.Errorf("invalid log line prefix, too short")
 	}
-
-	pos := strings.Index(line[26:], " ") // find end of timezone abbreviation
+	cur := 26
+	pos := strings.Index(line[cur:], " ") // find end of timezone abbreviation
 	if pos < 0 {
 		return nil, fmt.Errorf("invalid log line prefix")
 	}
 
-	ts, err := time.Parse("2006-02-01 15:04:05.000 MST", line[:26+pos])
+	cur += pos
+	ts, err := time.Parse("2006-02-01 15:04:05.000 MST", line[:cur])
 	if err != nil {
-		return nil, fmt.Errorf("could not parse timestamp: %w", err)
+		return nil, fmt.Errorf("could not parse timestamp '%s': %w", line[:cur], err)
 	}
 
-	fmt.Printf("line[:26+pos]: %s\n", line[26+pos:])
-	pos = strings.Index(line[26+pos:], "AUDIT: ")
+	pos = strings.Index(line[cur:], "AUDIT: ")
 	if pos < 0 {
 		return nil, fmt.Errorf("not a pgaudit line")
 	}
 
-	csvReader := csv.NewReader(strings.NewReader(line[pos+len("AUDIT: "):]))
+	cur += pos + len("AUDIT: ")
+	csvReader := csv.NewReader(strings.NewReader(line[cur:]))
 	csvFields, err := csvReader.Read()
 	if err != nil {
 		return nil, fmt.Errorf("invalid csv line, %w", err)
@@ -93,56 +94,3 @@ func (p *PGAuditLineParser) Parse(line string) ([]byte, error) {
 
 	return bytes, nil
 }
-
-// func PGAuditTrail(queryOnly bool) {
-// 	log.Printf("Starting KV PGAudit trail")
-// 	opts := immudb.DefaultOptions().WithAddress("localhost").WithPort(3322)
-
-// 	client := immudb.NewClient().WithOptions(opts)
-// 	err := client.OpenSession(context.TODO(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	defer client.CloseSession(context.TODO())
-// 	immuObjects := immudbrepository.NewJsonRepository(client, "pgaudit", []string{"statement_id", "timestamp", "audit_type", "class", "command"})
-
-// 	pgAuditFile, err := os.Open("test/pgaudit.log")
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	pgAuditScanner := bufio.NewScanner(pgAuditFile)
-// 	pgAuditScanner.Split(bufio.ScanLines)
-
-// 	for pgAuditScanner.Scan() {
-// 		line := pgAuditScanner.Text()
-
-// 		pga, err := parsePgAuditLine(line)
-// 		if err != nil {
-// 			log.Printf("error parsing line: %v", err)
-// 			continue
-// 		}
-
-// 		txID, err := immuObjects.Store(pga)
-// 		if err != nil {
-// 			log.Fatal(err)
-// 		}
-
-// 		log.Printf("stored object with txID %d: %+v\n", txID, pga)
-// 	}
-
-// 	objects, err := immuObjects.Restore("statement_id", "92")
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	log.Printf("OBJECTS: %+v, COUNT: %d\n", objects, len(objects))
-
-// 	objectsHistory, err := immuObjects.History("921")
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	log.Printf("History OBJECTS: %+v, COUNT: %d\n", objectsHistory, len(objectsHistory))
-// }
