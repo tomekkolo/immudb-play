@@ -9,8 +9,9 @@ import (
 )
 
 type Config struct {
-	Parser string
-	Type   string
+	Parser  string
+	Type    string
+	Indexes []string
 }
 
 type configs struct {

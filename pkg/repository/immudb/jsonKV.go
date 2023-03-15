@@ -26,23 +26,17 @@ func NewJsonKVRepository(cli immudb.ImmuClient, collection string) (*JsonKVRepos
 	}
 
 	// read collection definition
-	indexedKeys := []string{}
-	entry, err := cli.Get(context.TODO(), []byte(fmt.Sprintf("%s.collection", collection)))
+	cfg, err := NewConfigs(cli).Read(collection)
 	if err != nil {
-		return nil, fmt.Errorf("collection %s does not exist, create before use, %w", collection, err)
+		return nil, fmt.Errorf("collection is missing definition, %w", err)
 	}
 
-	err = json.Unmarshal(entry.Value, &indexedKeys)
-	if err != nil {
-		return nil, fmt.Errorf("could not unmarsahl indexes definition, %w", err)
-	}
-
-	log.WithField("indexes", indexedKeys).Info("Indexes from immudb")
+	log.WithField("indexes", cfg.Indexes).Info("Indexes from immudb")
 
 	return &JsonKVRepository{
 		client:      cli,
 		collection:  collection,
-		indexedKeys: indexedKeys,
+		indexedKeys: cfg.Indexes,
 	}, nil
 }
 

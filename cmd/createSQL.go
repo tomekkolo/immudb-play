@@ -39,6 +39,8 @@ func createSQL(cmd *cobra.Command, args []string) error {
 		flagColumns = []string{"uid=VARCHAR", "timestamp=TIMESTAMP"}
 		primaryKey = []string{"uid"}
 		log.WithField("columns", flagColumns).WithField("primary_key", primaryKey).Info("Using default indexes for wrap parser")
+	} else if flagParser != "" {
+		return fmt.Errorf("unkown parser %s", flagParser)
 	}
 
 	if len(flagColumns) == 0 || len(primaryKey) == 0 {
@@ -46,7 +48,7 @@ func createSQL(cmd *cobra.Command, args []string) error {
 	}
 
 	cfgs := immudb.NewConfigs(immuCli)
-	err = cfgs.Write(args[0], immudb.Config{Parser: flagParser, Type: "sql"})
+	err = cfgs.Write(args[0], immudb.Config{Parser: flagParser, Type: "sql", Indexes: flagColumns})
 	if err != nil {
 		return fmt.Errorf("collection does not exist, please create one first")
 	}

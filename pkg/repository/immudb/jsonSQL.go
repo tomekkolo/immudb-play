@@ -33,27 +33,34 @@ func NewJsonSQLRepository(cli immudb.ImmuClient, collection string) (*JsonSQLRep
 
 	res, err := tx.SQLQuery(context.TODO(), fmt.Sprintf("select name from Tables() where name like '%s';", collection), nil)
 	if err != nil {
-		return nil, fmt.Errorf("coudl not query tables, %w", err)
+		return nil, fmt.Errorf("could not query tables, %w", err)
 	}
 
 	if len(res.Rows) != 1 {
 		return nil, errors.New("collection does not exist")
 	}
 
-	res, err = tx.SQLQuery(context.TODO(), "SELECT name,type FROM COLUMNS(@name);", map[string]interface{}{"name": collection})
+	cfg, err := NewConfigs(cli).Read(collection)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("collection is missing definition, %w", err)
 	}
 
 	columns := []column{}
-	for _, r := range res.Rows {
-		columns = append(columns, column{name: r.Values[0].GetS(), cType: r.Values[1].GetS()})
+	for _, c := range cfg.Indexes {
+		splitted := strings.Split(c, "=")
+		if len(splitted) != 2 {
+			return nil, fmt.Errorf("invalid index definition, %s", c)
+		}
+
+		columns = append(columns, column{name: splitted[0], cType: splitted[1]})
 	}
 
 	_, err = tx.Commit(context.TODO())
 	if err != nil {
 		return nil, fmt.Errorf("could not initialize sql repository, %w", err)
 	}
+
+	log.WithField("columns", columns).Info("Columns from immudb")
 	return &JsonSQLRepository{
 		client:     cli,
 		collection: collection,
@@ -86,14 +93,13 @@ func (jr *JsonSQLRepository) WriteBytes(jBytes []byte) (uint64, error) {
 			return 0, fmt.Errorf("missing field %s in object", c)
 		}
 
-		switch c.cType {
-		case "INTEGER":
+		if c.cType == "INTEGER" {
 			params[c.name] = gjr.Int()
-		case "VARCHAR":
+		} else if strings.HasPrefix(c.cType, "VARCHAR") {
 			params[c.name] = gjr.String()
-		case "TIMESTAMP":
+		} else if c.cType == "TIMESTAMP" {
 			params[c.name] = gjr.Time()
-		default:
+		} else {
 			return 0, fmt.Errorf("unsupported field type %s", c.cType)
 		}
 	}
@@ -126,6 +132,7 @@ func (jr *JsonSQLRepository) Read(query string) ([][]byte, error) {
 	}
 	sb.WriteString(";")
 
+	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Trace("reading")
 	res, err := jr.client.SQLQuery(context.TODO(), sb.String(), nil, true)
 	if err != nil {
 		return nil, err
@@ -144,13 +151,15 @@ func (jr *JsonSQLRepository) History(query string) ([][]byte, error) {
 	sb := strings.Builder{}
 	sb.WriteString("SELECT __value__ FROM ")
 	sb.WriteString(jr.collection)
+	sb.WriteString(" ")
 	if query != "" {
 		sb.WriteString(query)
 	} else {
-		sb.WriteString(" SINCE TX 1 ")
+		sb.WriteString("SINCE TX 1 ")
 	}
 	sb.WriteString(";")
 
+	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Trace("history")
 	res, err := jr.client.SQLQuery(context.TODO(), sb.String(), nil, true)
 	if err != nil {
 		return nil, err
@@ -189,8 +198,9 @@ func SetupJsonSQLRepository(cli immudb.ImmuClient, collection string, primaryKey
 		if len(splitted) != 2 {
 			return fmt.Errorf("invalid index definition, %s", column)
 		}
-
+		sb.WriteString("\"")
 		sb.WriteString(splitted[0])
+		sb.WriteString("\"")
 		sb.WriteString(" ")
 		sb.WriteString(splitted[1])
 		sb.WriteString(",")

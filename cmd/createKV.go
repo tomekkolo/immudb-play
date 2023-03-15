@@ -36,6 +36,8 @@ func createKV(cmd *cobra.Command, args []string) error {
 	} else if flagParser == "wrap" {
 		flagIndexes = []string{"uid", "timestamp"}
 		log.WithField("indexes", flagIndexes).Info("Using default indexes for wrap parser")
+	} else if flagParser != "" {
+		return fmt.Errorf("unkown parser %s", flagParser)
 	}
 
 	if len(flagIndexes) == 0 {
@@ -43,7 +45,7 @@ func createKV(cmd *cobra.Command, args []string) error {
 	}
 
 	cfgs := immudb.NewConfigs(immuCli)
-	err = cfgs.Write(args[0], immudb.Config{Parser: flagParser, Type: "kv"})
+	err = cfgs.Write(args[0], immudb.Config{Parser: flagParser, Type: "kv", Indexes: flagIndexes})
 	if err != nil {
 		return fmt.Errorf("collection does not exist, please create one first")
 	}
