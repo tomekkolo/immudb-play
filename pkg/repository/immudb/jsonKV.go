@@ -29,15 +29,15 @@ func NewJsonKVRepository(cli immudb.ImmuClient, collection string) (*JsonKVRepos
 	indexedKeys := []string{}
 	entry, err := cli.Get(context.TODO(), []byte(fmt.Sprintf("%s.collection", collection)))
 	if err != nil {
-		log.WithField("collection", collection).WithError(err).Warn("collection does not exist, create before use", collection, err)
-	} else {
-		err = json.Unmarshal(entry.Value, &indexedKeys)
-		if err != nil {
-			return nil, fmt.Errorf("could not unmarsahl indexes definition, %w", err)
-		}
-
-		log.WithField("indexes", indexedKeys).Info("Indexes from immudb")
+		return nil, fmt.Errorf("collection %s does not exist, create before use, %w", collection, err)
 	}
+
+	err = json.Unmarshal(entry.Value, &indexedKeys)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarsahl indexes definition, %w", err)
+	}
+
+	log.WithField("indexes", indexedKeys).Info("Indexes from immudb")
 
 	return &JsonKVRepository{
 		client:      cli,
@@ -46,18 +46,16 @@ func NewJsonKVRepository(cli immudb.ImmuClient, collection string) (*JsonKVRepos
 	}, nil
 }
 
-func (jr *JsonKVRepository) Create(indexedKeys []string) error {
+func SetupJsonKVRepository(cli immudb.ImmuClient, collection string, indexedKeys []string) error {
 	b, err := json.Marshal(indexedKeys)
 	if err != nil {
 		return fmt.Errorf("could not marshal indexes definition, %w", err)
 	}
 
-	_, err = jr.client.Set(context.TODO(), []byte(fmt.Sprintf("%s.collection", jr.collection)), b)
+	_, err = cli.Set(context.TODO(), []byte(fmt.Sprintf("%s.collection", collection)), b)
 	if err != nil {
 		return fmt.Errorf("could not store indexes definition, %w", err)
 	}
-
-	jr.indexedKeys = indexedKeys
 
 	return nil
 }
@@ -70,6 +68,17 @@ func (jr *JsonKVRepository) Write(jObject interface{}) (uint64, error) {
 
 	return jr.WriteBytes(objectBytes)
 }
+
+// Writes json bytes as key-values in immudb, with help of gjson to extract
+// json fields as indexes.
+//
+// Underlying key structure is as follow:
+//
+// Primary index: <collection>.<primary field name>.{<primary field value as text>}
+// Additional indexes: <collection>.<indexed field name>.{<indexed field value as text>}.{<primary field value as text>}
+// Original json as bytes: <collection>.payload.<primary field name>.{<primary field value as text>}
+//
+// Indexes values contain the name of payload key
 
 func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 	if len(jr.indexedKeys) == 0 {
@@ -84,7 +93,7 @@ func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 	for _, pkPart := range strings.Split(jr.indexedKeys[0], "+") {
 		gjPK := gjsonObject.Get(pkPart)
 		if !gjPK.Exists() {
-			return 0, fmt.Errorf("missing primary key in object, %s", pkPart)
+			return 0, fmt.Errorf("missing primary key in json, %s", pkPart)
 		}
 		pk += gjPK.String()
 	}
@@ -105,7 +114,7 @@ func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 	for i := 1; i < len(jr.indexedKeys); i++ {
 		gjSK := gjsonObject.Get(jr.indexedKeys[i])
 		if !gjSK.Exists() {
-			return 0, errors.New("missing secondary key in object")
+			return 0, errors.New("missing secondary key in json")
 		}
 
 		immudbObjectRequest.KVs = append(immudbObjectRequest.KVs,
@@ -116,43 +125,10 @@ func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 		)
 	}
 
-	// iterate over all object fields
-	// gjsonObject.ForEach(func(key, value gjson.Result) bool {
-	// 	immudbObjectRequest.KVs = append(immudbObjectRequest.KVs, &schema.KeyValue{
-	// 		Key:   []byte(fmt.Sprintf("%s.{%s}.%s", jr.collection, gjPK.String(), key.Str)),
-	// 		Value: []byte(value.Raw),
-	// 	})
-	// 	return true
-	// })
-
 	txh, err := jr.client.SetAll(context.TODO(), immudbObjectRequest)
 	if err != nil {
 		return 0, fmt.Errorf("could not store object: %w", err)
 	}
-
-	// Create set at transaction for later retrieval of versioned object
-	// for i, or := range immudbObjectRequest.KVs {
-	// 	if i < len(jr.indexedKeys) {
-	// 		continue
-	// 	}
-	// 	_, err := jr.client.ZAddAt(context.TODO(),
-	// 		[]byte(fmt.Sprintf("%s.%s.{%s}.%d", jr.collection, jr.indexedKeys[0], gjPK.String(), txh.Id)),
-	// 		0,
-	// 		or.Key,
-	// 		txh.Id,
-	// 	)
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// }
-
-	// create index for set versions
-	// _, err = jr.client.Set(context.TODO(),
-	// 	[]byte(fmt.Sprintf("%s.versions.%s.{%s}", jr.collection, jr.indexedKeys[0], gjPK.String())), []byte(fmt.Sprintf("%d", txh.Id)))
-
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
 
 	log.WithField("txID", txh.Id).Trace("Wrote entry")
 
@@ -160,12 +136,26 @@ func (jr *JsonKVRepository) WriteBytes(jBytes []byte) (uint64, error) {
 }
 
 // for now just based on SK
-func (jr *JsonKVRepository) Read(key, condition string) ([][]byte, error) {
+func (jr *JsonKVRepository) Read(key string, prefix string) ([][]byte, error) {
+	if key == "" {
+		key = jr.indexedKeys[0]
+	}
+
+	validKey := false
+	for _, s := range jr.indexedKeys {
+		if s == key {
+			validKey = true
+		}
+	}
+	if !validKey {
+		return nil, fmt.Errorf("not indexed key %s", key)
+	}
+
 	seekKey := []byte("")
 	var objects [][]byte
 	for {
 		entries, err := jr.client.Scan(context.TODO(), &schema.ScanRequest{
-			Prefix:  []byte(fmt.Sprintf("%s.%s.{%s", jr.collection, key, condition)),
+			Prefix:  []byte(fmt.Sprintf("%s.%s.{%s", jr.collection, key, prefix)),
 			SeekKey: seekKey,
 			Limit:   999,
 		})
@@ -174,7 +164,7 @@ func (jr *JsonKVRepository) Read(key, condition string) ([][]byte, error) {
 		}
 
 		if len(entries.Entries) == 0 {
-			log.WithField("key", key).WithField("condition", condition).Debug("No more entries matching condition")
+			log.WithField("key", key).WithField("prefix", prefix).Debug("No more entries matching condition")
 			break
 		}
 

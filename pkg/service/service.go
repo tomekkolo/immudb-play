@@ -5,7 +5,6 @@ import (
 	"io"
 
 	log "github.com/sirupsen/logrus"
-	immudbrepository "github.com/tomekkolo/immudb-play/pkg/repository/immudb"
 )
 
 type lineProvider interface {
@@ -18,8 +17,6 @@ type LineParser interface {
 
 type JsonRepository interface {
 	WriteBytes(b []byte) (uint64, error)
-	Read(key string, condition string) ([][]byte, error)
-	History(primaryKeyValue string) ([]immudbrepository.History, error)
 }
 
 type AuditHistoryEntry struct {
@@ -64,6 +61,6 @@ func (as *AuditService) Run() error {
 			return fmt.Errorf("could not store audit entry, %w", err)
 		}
 
-		log.WithField("_id", id).WithField("line", l).Trace("Stored line")
+		log.WithField("TXID", id).WithField("line", l).Trace("Stored line")
 	}
 }

@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
+	"github.com/tomekkolo/immudb-play/pkg/lineparser"
+	"github.com/tomekkolo/immudb-play/pkg/repository/immudb"
+	"github.com/tomekkolo/immudb-play/pkg/service"
 )
 
 var flagFollow bool
@@ -14,7 +19,7 @@ var tailCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(tailCmd)
-	tailCmd.PersistentFlags().BoolVar(&flagFollow, "follow", false, "If True, follow data stream")
+	tailCmd.PersistentFlags().BoolVar(&flagFollow, "follow", false, "If True, follow data stream. The follower supports file rotation.")
 }
 
 func tail(cmd *cobra.Command, args []string) error {
@@ -28,4 +33,40 @@ func tail(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func newLineParser(name string) (service.LineParser, error) {
+	var lp service.LineParser
+	switch name {
+	case "":
+		lp = lineparser.NewDefaultLineParser()
+	case "pgaudit":
+		lp = lineparser.NewPGAuditLineParser()
+	case "wrap":
+		lp = lineparser.NewWrapLineParser()
+	default:
+		return nil, fmt.Errorf("not supported parser: %s", flagParser)
+	}
+
+	return lp, nil
+}
+
+func newJsonRepository(rType string, collection string) (service.JsonRepository, error) {
+	var jsonRepository service.JsonRepository
+	var err error
+	switch rType {
+	case "kv":
+		jsonRepository, err = immudb.NewJsonKVRepository(immuCli, collection)
+		if err != nil {
+			return nil, fmt.Errorf("could not create json repository, %w", err)
+		}
+	case "sql":
+		jsonRepository, err = immudb.NewJsonSQLRepository(immuCli, collection)
+		if err != nil {
+			return nil, fmt.Errorf("could not create json repository, %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("invalid repository type %s", rType)
+	}
+	return jsonRepository, nil
 }

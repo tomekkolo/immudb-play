@@ -1,16 +1,13 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
 var auditCmd = &cobra.Command{
-	Use:   "audit <collection> <primary key>",
+	Use:   "audit",
 	Short: "Audit data from immudb",
 	RunE:  audit,
-	Args:  cobra.ExactArgs(2),
 }
 
 func init() {
@@ -18,23 +15,14 @@ func init() {
 }
 
 func audit(cmd *cobra.Command, args []string) error {
+	if cmd.CalledAs() == "audit" {
+		return cmd.Help()
+	}
+
 	err := runParentCmdE(cmd, args)
 	if err != nil {
 		return err
 	}
 
-	err = configure(args[0])
-	if err != nil {
-		return err
-	}
-
-	history, err := jsonRepository.History(args[1])
-	if err != nil {
-		return fmt.Errorf("could not read, %w", err)
-	}
-
-	for _, h := range history {
-		fmt.Printf("{\"tx_id\": %d, \"revision\": %d, \"entry\": %s}\n", h.TxID, h.Revision, string(h.Entry))
-	}
 	return nil
 }

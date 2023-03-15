@@ -5,15 +5,18 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/tomekkolo/immudb-play/pkg/repository/immudb"
 	"github.com/tomekkolo/immudb-play/pkg/service"
 	"github.com/tomekkolo/immudb-play/pkg/source"
 )
 
 var tailDockerCmd = &cobra.Command{
 	Use:   "docker <collection> <container>",
-	Short: "Tail from docker logs and store audit data in immudb",
-	RunE:  tailDocker,
-	Args:  cobra.ExactArgs(2),
+	Short: "Tail from docker logs and store audit data in immudb collection. Collection needs to be created first.",
+	Example: `immudb-play tail docker pgaudit psql-postgresql-1 --follow --stdout --stderr
+immudb-play tail docker somecollection 3855fafd83b6 --stdout --stderr`,
+	RunE: tailDocker,
+	Args: cobra.ExactArgs(2),
 }
 
 func tailDocker(cmd *cobra.Command, args []string) error {
@@ -24,9 +27,19 @@ func tailDocker(cmd *cobra.Command, args []string) error {
 
 	log.WithField("args", args).Info("Docker tail")
 
-	err = configure(args[0])
+	cfg, err := immudb.NewConfigs(immuCli).Read(args[0])
 	if err != nil {
-		return err
+		return fmt.Errorf("collection does not exist, please create one first, %w", err)
+	}
+
+	lp, err := newLineParser(cfg.Parser)
+	if err != nil {
+		return fmt.Errorf("collection configuration is corrupted, %w", err)
+	}
+
+	jsonRepository, err := newJsonRepository(cfg.Type, args[0])
+	if err != nil {
+		return fmt.Errorf("collection configuration is corrupted, %w", err)
 	}
 
 	flagSince, _ := cmd.Flags().GetString("since")

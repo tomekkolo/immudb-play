@@ -14,7 +14,7 @@ var immuCli client.ImmuClient
 
 var rootCmd = &cobra.Command{
 	Use:               "immudb-audit",
-	Short:             "Store and audit your data",
+	Short:             "Store and audit your data in immudb",
 	RunE:              root,
 	PersistentPostRun: rootPost,
 }

@@ -11,14 +11,16 @@ import (
 
 var createKVCmd = &cobra.Command{
 	Use:   "kv <collection>",
-	Short: "create kv collection in immudb",
-	RunE:  createKV,
-	Args:  cobra.ExactArgs(1),
+	Short: "Create collection in immudb with key-value",
+	Example: `immudb-audit create kv samplecollection --parser pgaudit
+immudb-audit create kv samplecollection --indexes unique_field1,field2,field3`,
+	RunE: createKV,
+	Args: cobra.ExactArgs(1),
 }
 
 func init() {
 	createCmd.AddCommand(createKVCmd)
-	createKVCmd.Flags().StringSlice("indexes", nil, "List of JSON fields to create indexes for. First entry is primary key")
+	createKVCmd.Flags().StringSlice("indexes", nil, "List of JSON fields to create indexes for. First entry is considered as unique primary key")
 }
 
 func createKV(cmd *cobra.Command, args []string) error {
@@ -29,7 +31,7 @@ func createKV(cmd *cobra.Command, args []string) error {
 
 	flagIndexes, _ := cmd.Flags().GetStringSlice("indexes")
 	if flagParser == "pgaudit" {
-		flagIndexes = []string{"statement_id", "timestamp", "audit_type", "class", "command"}
+		flagIndexes = []string{"statement_id", "log_timestamp", "timestamp", "audit_type", "class", "command"}
 		log.WithField("indexes", flagIndexes).Info("Using default indexes for pgaudit parser")
 	} else if flagParser == "wrap" {
 		flagIndexes = []string{"uid", "timestamp"}
@@ -40,20 +42,15 @@ func createKV(cmd *cobra.Command, args []string) error {
 		return errors.New("at least primary key needs to be specified")
 	}
 
-	jsonKVRepository, err := immudb.NewJsonKVRepository(immuCli, args[0])
-	if err != nil {
-		return fmt.Errorf("could not create json repository, %w", err)
-	}
-
-	err = jsonKVRepository.Create(flagIndexes)
-	if err != nil {
-		return err
-	}
-
 	cfgs := immudb.NewConfigs(immuCli)
 	err = cfgs.Write(args[0], immudb.Config{Parser: flagParser, Type: "kv"})
 	if err != nil {
 		return fmt.Errorf("collection does not exist, please create one first")
+	}
+
+	err = immudb.SetupJsonKVRepository(immuCli, args[0], flagIndexes)
+	if err != nil {
+		return fmt.Errorf("could not create json repository, %w", err)
 	}
 
 	return nil
