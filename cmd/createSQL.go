@@ -36,7 +36,7 @@ func createSQL(cmd *cobra.Command, args []string) error {
 		primaryKey = []string{"statement_id"}
 		log.WithField("columns", flagColumns).WithField("primary_key", primaryKey).Info("Using default indexes for pgaudit parser")
 	} else if flagParser == "wrap" {
-		flagColumns = []string{"uid=VARCHAR", "timestamp=TIMESTAMP"}
+		flagColumns = []string{"uid=VARCHAR[256]", "log_timestamp=TIMESTAMP"}
 		primaryKey = []string{"uid"}
 		log.WithField("columns", flagColumns).WithField("primary_key", primaryKey).Info("Using default indexes for wrap parser")
 	} else if flagParser != "" {
