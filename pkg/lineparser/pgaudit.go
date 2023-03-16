@@ -42,7 +42,7 @@ func (p *PGAuditLineParser) Parse(line string) ([]byte, error) {
 	}
 
 	cur += pos
-	ts, err := time.Parse("2006-02-01 15:04:05.000 MST", line[:cur])
+	ts, err := time.Parse("2006-01-02 15:04:05.000 MST", line[:cur])
 	if err != nil {
 		return nil, fmt.Errorf("could not parse timestamp '%s': %w", line[:cur], err)
 	}

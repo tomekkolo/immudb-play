@@ -32,7 +32,7 @@ func createSQL(cmd *cobra.Command, args []string) error {
 	primaryKey, _ := cmd.Flags().GetStringSlice("primary-key")
 	flagColumns, _ := cmd.Flags().GetStringSlice("columns")
 	if flagParser == "pgaudit" {
-		flagColumns = []string{"statement_id=INTEGER", "log_timestamp=TIMESTAMP", "\"timestamp\"=TIMESTAMP", "audit_type=VARCHAR[256]", "class=VARCHAR[256]", "command=VARCHAR[256]"}
+		flagColumns = []string{"statement_id=INTEGER", "log_timestamp=TIMESTAMP", "timestamp=TIMESTAMP", "audit_type=VARCHAR[256]", "class=VARCHAR[256]", "command=VARCHAR[256]"}
 		primaryKey = []string{"statement_id"}
 		log.WithField("columns", flagColumns).WithField("primary_key", primaryKey).Info("Using default indexes for pgaudit parser")
 	} else if flagParser == "wrap" {

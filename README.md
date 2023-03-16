@@ -109,6 +109,8 @@ You can use [docker-compose.yml](test/pgaudit/docker-compose.yml) from this repo
 docker-compose up -d -f test/pgaudit/docker-compose.yml
 ```
 
+Note: you can execute ```go run test/utils/psql.go``` to generate audit entries.
+
 Create immudb-audit collection for logs
 
 ```bash

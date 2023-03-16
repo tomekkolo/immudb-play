@@ -22,7 +22,7 @@ func PopulatePSQL() {
 		log.Fatal("could not create table", err)
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 3000; i++ {
 		log.Printf("QUERY: %s\n", fmt.Sprintf("insert into audit_trail(id, ts, usr, action, sourceip, context) VALUES ('%s', NOW(), '%s', 1, '127.0.0.1', 'some context')",
 			uuid.New().String(), "user"+fmt.Sprint(i)))
 		_, err := db.Exec(fmt.Sprintf("insert into audit_trail(id, ts, usr, action, sourceip, context) VALUES ('%s', NOW(), '%s', 1, '127.0.0.1', 'some context')",

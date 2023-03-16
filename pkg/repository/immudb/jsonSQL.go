@@ -130,17 +130,26 @@ func (jr *JsonSQLRepository) Read(query string) ([][]byte, error) {
 		sb.WriteString(" WHERE ")
 		sb.WriteString(query)
 	}
-	sb.WriteString(";")
 
-	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Info("reading")
-	res, err := jr.client.SQLQuery(context.TODO(), sb.String(), nil, true)
-	if err != nil {
-		return nil, err
-	}
-
+	offset := 0
 	ret := [][]byte{}
-	for _, r := range res.Rows {
-		ret = append(ret, r.Values[0].GetBs())
+	for {
+		page := fmt.Sprintf(" LIMIT 999 OFFSET %d;", offset)
+		log.WithField("sql", sb.String()+page).WithField("collection", jr.collection).Info("reading")
+		res, err := jr.client.SQLQuery(context.TODO(), sb.String()+page, map[string]interface{}{"ofs": offset}, true)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(res.Rows) == 0 {
+			break
+		}
+
+		offset += len(res.Rows)
+
+		for _, r := range res.Rows {
+			ret = append(ret, r.Values[0].GetBs())
+		}
 	}
 
 	return ret, nil
@@ -149,31 +158,54 @@ func (jr *JsonSQLRepository) Read(query string) ([][]byte, error) {
 func (jr *JsonSQLRepository) History(query string) ([][]byte, error) {
 	// intentionally accepting query as is for now.
 	sb := strings.Builder{}
-	sb.WriteString("SELECT __value__ FROM ")
+	sb.WriteString("SELECT \"")
+	sb.WriteString(jr.columns[0].name)
+	sb.WriteString("\",__value__ FROM ")
 	sb.WriteString(jr.collection)
 	sb.WriteString(" ")
 	if query != "" {
 		sb.WriteString(query)
 	} else {
-		sb.WriteString("SINCE TX 1 ")
-	}
-	sb.WriteString(";")
-
-	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Info("history")
-	res, err := jr.client.SQLQuery(context.TODO(), sb.String(), nil, true)
-	if err != nil {
-		return nil, err
+		sb.WriteString("SINCE TX 1 UNTIL NOW() ")
 	}
 
 	h := [][]byte{}
-	for _, r := range res.Rows {
+
+	page := fmt.Sprintf(" ORDER BY \"%s\" DESC LIMIT 999", jr.columns[0].name)
+	for {
+		log.WithField("sql", sb.String()+page).WithField("collection", jr.collection).Info("history")
+		res, err := jr.client.SQLQuery(context.TODO(), sb.String()+page, nil, true)
 		if err != nil {
-			return nil, fmt.Errorf("error querying for row TX")
+			return nil, err
 		}
 
-		h = append(h, r.Values[0].GetBs())
-	}
+		if len(res.Rows) == 0 {
+			break
+		}
 
+		for _, r := range res.Rows {
+			if err != nil {
+				return nil, fmt.Errorf("error querying for row TX")
+			}
+
+			h = append(h, r.Values[1].GetBs())
+		}
+
+		if jr.columns[0].cType == "INTEGER" {
+			page = fmt.Sprintf(" \"%s\" < %d ORDER BY \"%s\" DESC LIMIT 999;", jr.columns[0].name, res.Rows[len(res.Rows)-1].Values[0].GetN(), jr.columns[0].name)
+		} else if strings.HasPrefix(jr.columns[0].cType, "VARCHAR") {
+			page = fmt.Sprintf(" \"%s\" < '%s' ORDER BY \"%s\" DESC LIMIT 999;", jr.columns[0].name, res.Rows[len(res.Rows)-1].Values[0].GetS(), jr.columns[0].name)
+		} else if jr.columns[0].cType == "TIMESTAMP" {
+			page = fmt.Sprintf(" \"%s\" < %d ORDER BY \"%s\" DESC LIMIT 999;", jr.columns[0].name, res.Rows[len(res.Rows)-1].Values[0].GetTs(), jr.columns[0].name)
+		} else {
+			return nil, fmt.Errorf("unsupported field type %s", jr.columns[0].cType)
+		}
+
+		if !strings.Contains(strings.ToLower(sb.String()), "where") {
+			page = " WHERE " + page
+		}
+
+	}
 	return h, nil
 }
 
