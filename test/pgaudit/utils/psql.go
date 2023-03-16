@@ -12,10 +12,15 @@ import (
 func PopulatePSQL() {
 	db, err := sql.Open("postgres", "host=localhost port=5432 user=postgres sslmode=disable")
 	if err != nil {
-		log.Fatal("d1", err)
+		log.Fatal("could not connect", err)
 	}
 
 	defer db.Close()
+
+	_, err = db.Exec("create table if not exists audit_trail (id VARCHAR, ts TIMESTAMP, usr VARCHAR, action INTEGER, sourceip VARCHAR, context VARCHAR, PRIMARY KEY(id));")
+	if err != nil {
+		log.Fatal("could not create table", err)
+	}
 
 	for i := 0; i < 1000; i++ {
 		log.Printf("QUERY: %s\n", fmt.Sprintf("insert into audit_trail(id, ts, usr, action, sourceip, context) VALUES ('%s', NOW(), '%s', 1, '127.0.0.1', 'some context')",
