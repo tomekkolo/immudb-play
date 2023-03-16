@@ -8,8 +8,8 @@ import (
 )
 
 type wrap struct {
-	Uid     string
-	Ts      time.Time `json:"timestamp"`
+	Uid     string    `json:"uid"`
+	Ts      time.Time `json:"log_timestamp"`
 	Message string    `json:"message"`
 }
 

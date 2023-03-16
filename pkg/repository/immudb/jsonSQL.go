@@ -132,7 +132,7 @@ func (jr *JsonSQLRepository) Read(query string) ([][]byte, error) {
 	}
 	sb.WriteString(";")
 
-	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Trace("reading")
+	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Info("reading")
 	res, err := jr.client.SQLQuery(context.TODO(), sb.String(), nil, true)
 	if err != nil {
 		return nil, err
@@ -159,7 +159,7 @@ func (jr *JsonSQLRepository) History(query string) ([][]byte, error) {
 	}
 	sb.WriteString(";")
 
-	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Trace("history")
+	log.WithField("sql", sb.String()).WithField("collection", jr.collection).Info("history")
 	res, err := jr.client.SQLQuery(context.TODO(), sb.String(), nil, true)
 	if err != nil {
 		return nil, err
@@ -220,9 +220,9 @@ func SetupJsonSQLRepository(cli immudb.ImmuClient, collection string, primaryKey
 	sb = strings.Builder{}
 	sb.WriteString("CREATE INDEX IF NOT EXISTS ON ")
 	sb.WriteString(collection)
-	sb.WriteString("(")
-	sb.WriteString(strings.Join(indexes, ","))
-	sb.WriteString(");")
+	sb.WriteString("(\"")
+	sb.WriteString(strings.Join(indexes, "\",\""))
+	sb.WriteString("\");")
 
 	log.WithField("sql", sb.String()).Info("Creating indexes")
 	err = tx.SQLExec(context.TODO(), sb.String(), nil)

@@ -51,6 +51,8 @@ func SetupJsonKVRepository(cli immudb.ImmuClient, collection string, indexedKeys
 		return fmt.Errorf("could not store indexes definition, %w", err)
 	}
 
+	log.WithField("collection", collection).WithField("indexes", indexedKeys).Info("Created")
+
 	return nil
 }
 
