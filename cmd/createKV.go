@@ -13,14 +13,15 @@ var createKVCmd = &cobra.Command{
 	Use:   "kv <collection>",
 	Short: "Create collection in immudb with key-value",
 	Example: `immudb-audit create kv samplecollection --parser pgaudit
-immudb-audit create kv samplecollection --indexes unique_field1,field2,field3`,
+immudb-audit create kv samplecollection --indexes unique_field1,field2,field3
+immudb-audit create kv samplecollection --indexes field1+field2,field2,field3`,
 	RunE: createKV,
 	Args: cobra.ExactArgs(1),
 }
 
 func init() {
 	createCmd.AddCommand(createKVCmd)
-	createKVCmd.Flags().StringSlice("indexes", nil, "List of JSON fields to create indexes for. First entry is considered as unique primary key")
+	createKVCmd.Flags().StringSlice("indexes", nil, "List of JSON fields to create indexes for. First entry is considered as unique primary key. If needed, multiple fields can be used as primary key with syntax field1+field2...")
 }
 
 func createKV(cmd *cobra.Command, args []string) error {

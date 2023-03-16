@@ -124,31 +124,44 @@ func (jr *JsonSQLRepository) WriteBytes(jBytes []byte) (uint64, error) {
 func (jr *JsonSQLRepository) Read(query string) ([][]byte, error) {
 	// intentionally accepting query as is for now.
 	sb := strings.Builder{}
-	sb.WriteString("SELECT __value__ FROM ")
+	sb.WriteString("SELECT \"")
+	sb.WriteString(jr.columns[0].name)
+	sb.WriteString("\",__value__ FROM ")
 	sb.WriteString(jr.collection)
 	if query != "" {
 		sb.WriteString(" WHERE ")
 		sb.WriteString(query)
 	}
 
-	offset := 0
+	page := fmt.Sprintf(" ORDER BY \"%s\" DESC LIMIT 999", jr.columns[0].name)
 	ret := [][]byte{}
 	for {
-		page := fmt.Sprintf(" LIMIT 999 OFFSET %d;", offset)
 		log.WithField("sql", sb.String()+page).WithField("collection", jr.collection).Info("reading")
-		res, err := jr.client.SQLQuery(context.TODO(), sb.String()+page, map[string]interface{}{"ofs": offset}, true)
+		res, err := jr.client.SQLQuery(context.TODO(), sb.String()+page, nil, true)
 		if err != nil {
 			return nil, err
 		}
 
-		if len(res.Rows) == 0 {
+		if len(res.Rows) < 999 {
 			break
 		}
 
-		offset += len(res.Rows)
-
 		for _, r := range res.Rows {
 			ret = append(ret, r.Values[0].GetBs())
+		}
+
+		if jr.columns[0].cType == "INTEGER" {
+			page = fmt.Sprintf(" \"%s\" < %d ORDER BY \"%s\" DESC LIMIT 999;", jr.columns[0].name, res.Rows[len(res.Rows)-1].Values[0].GetN(), jr.columns[0].name)
+		} else if strings.HasPrefix(jr.columns[0].cType, "VARCHAR") {
+			page = fmt.Sprintf(" \"%s\" < '%s' ORDER BY \"%s\" DESC LIMIT 999;", jr.columns[0].name, res.Rows[len(res.Rows)-1].Values[0].GetS(), jr.columns[0].name)
+		} else if jr.columns[0].cType == "TIMESTAMP" {
+			page = fmt.Sprintf(" \"%s\" < %d ORDER BY \"%s\" DESC LIMIT 999;", jr.columns[0].name, res.Rows[len(res.Rows)-1].Values[0].GetTs(), jr.columns[0].name)
+		} else {
+			return nil, fmt.Errorf("unsupported field type %s", jr.columns[0].cType)
+		}
+
+		if !strings.Contains(strings.ToLower(sb.String()), "where") {
+			page = " WHERE " + page
 		}
 	}
 
@@ -179,7 +192,7 @@ func (jr *JsonSQLRepository) History(query string) ([][]byte, error) {
 			return nil, err
 		}
 
-		if len(res.Rows) == 0 {
+		if len(res.Rows) < 999 {
 			break
 		}
 

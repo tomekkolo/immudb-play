@@ -25,13 +25,13 @@ To start storing data, you need to first create a collection and define fields f
 To create a custom key value collection. The indexes flag is a string slice, where the first entry is considered as primary key. Primary key can combine multiple fields from JSON, in a form field1+field2+... .
 
 ```bash
-./immudb-play create kv mycollection --indexes field1+field2,field2,field3
+./immudb-play create kv mycollection --indexes "field1+field2,field2,field3"
 ```
 
 Similarly, SQL collection can be created. The main difference is that in this case the field types need to be provided. 
 
 ```bash
-./immudb-play create sql mycollection --columns field1=INTEGER,field2=VARCHAR[256],field3=BLOB --primary-key field1,field2
+./immudb-play create sql mycollection --columns "field1=INTEGER,field2=VARCHAR[256],field3=BLOB" --primary-key "field1,field2"
 ```
 
 After creating a collection, data can be easily pushed using tail subcommand. immudb-play will retrieve collection definition, so there is no difference if key-value or sql was used. Currently supported sources are file and docker container. Both can be used with --follow option, which in case of files will also handle rotation.
