@@ -1,6 +1,20 @@
 # immudb-audit
 
-immudb-audit is a simple service and cli tool to store json formatted input and audit it later in immudb key-value or SQL.
+immudb-audit is a simple service and cli tool to store json formatted log input and audit it later in immudb key-value or SQL.
+
+Example input log source
+
+```json
+{"field1":1, "field2":"abc", "field3": "2023-03-10T22:38:26.461908Z", "group": {"field4":"cde"}}
+{"field1":2, "field2":"cde", "field3": "2023-03-10T22:38:26.461908Z", "group": {"field4":"cde"}}
+{"field1":3, "field2":"efg", "field3": "2023-04-10T22:38:26.461908Z", "group": {"field4":"cde"}}
+{"field1":4, "field2":"ijk", "field3": "2023-05-10T22:38:26.461908Z", "group": {"field4":"cde"}}
+```
+
+In addition, immudb-audit provides two predefined log line parsers:
+- pgaudit, which transforms pgaudit audit logs into json representation and stores them in immudb. 
+- wrap, which accepts any log line and wraps it into json adding uid and timestamp. 
+
 
 ## Overview
 immudb-audit uses either immudb key-value or SQL to store the data. In general, it transforms selected fields from JSON into key-values or SQL entries enabling easy and automated storage with later retrieval and audit of data. 
